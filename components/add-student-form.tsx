@@ -8,6 +8,7 @@ import {
   Text,
 } from "react-native";
 
+import { useStudents } from "../context/students-context";
 import { Student } from "../data/students";
 import FormField from "./form-field";
 
@@ -30,16 +31,26 @@ interface FormErrors {
   bio?: string;
 }
 
-// Validate form data
-function validateForm(data: FormData): FormErrors {
+function validateForm(
+  data: FormData,
+  students: Student[]
+): FormErrors {
   const newErrors: FormErrors = {};
 
   if (!data.name.trim()) {
     newErrors.name = "Full name is required.";
   }
 
-  if (!data.studentId.trim()) {
+  const enteredId = data.studentId.trim();
+
+  if (!enteredId) {
     newErrors.studentId = "Student ID is required.";
+  } else if (
+    students.some(
+      (s) => s.studentId.trim() === enteredId
+    )
+  ) {
+    newErrors.studentId = "Student ID already exists";
   }
 
   if (!data.department.trim()) {
@@ -56,7 +67,8 @@ function validateForm(data: FormData): FormErrors {
 export default function AddStudentForm({
   onSubmitSuccess,
 }: AddStudentFormProps) {
-  // Form state
+  const { students } = useStudents();
+
   const [formData, setFormData] = useState<FormData>({
     name: "",
     studentId: "",
@@ -65,24 +77,22 @@ export default function AddStudentForm({
     skillsText: "",
   });
 
-  // Validation state
   const [errors, setErrors] = useState<FormErrors>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [submitAttempted, setSubmitAttempted] = useState(false);
-
-  // Submission state
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitTrigger, setSubmitTrigger] = useState(false);
 
-  // Update a field
-  const updateField = (field: keyof FormData, value: string) => {
+  const updateField = (
+    field: keyof FormData,
+    value: string
+  ) => {
     setFormData((previous) => ({
       ...previous,
       [field]: value,
     }));
   };
 
-  // Mark a field as touched
   const markTouched = (field: string) => {
     setTouched((previous) => ({
       ...previous,
@@ -90,19 +100,19 @@ export default function AddStudentForm({
     }));
   };
 
-  // Show errors after blur or a submit attempt
-  const getFieldError = (field: keyof FormErrors) => {
+  const getFieldError = (
+    field: keyof FormErrors
+  ) => {
     return touched[field] || submitAttempted
       ? errors[field]
       : undefined;
   };
 
-  // Validate whenever form data changes
+  // Revalidate when the form or student list changes
   useEffect(() => {
-    setErrors(validateForm(formData));
-  }, [formData]);
+    setErrors(validateForm(formData, students));
+  }, [formData, students]);
 
-  // Check whether all required fields are valid
   const isFormValid =
     formData.name.trim().length > 0 &&
     formData.studentId.trim().length > 0 &&
@@ -110,11 +120,14 @@ export default function AddStudentForm({
     formData.bio.trim().length > 0 &&
     Object.keys(errors).length === 0;
 
-  // Handle Submit button press
   const handleSubmitPress = () => {
     setSubmitAttempted(true);
 
-    const validationErrors = validateForm(formData);
+    const validationErrors = validateForm(
+      formData,
+      students
+    );
+
     setErrors(validationErrors);
 
     if (Object.keys(validationErrors).length > 0) {
@@ -125,11 +138,24 @@ export default function AddStudentForm({
     setSubmitTrigger(true);
   };
 
-  // Submit effect: simulate a network request
+  // Simulate submission, then notify the parent screen
   useEffect(() => {
     if (!submitTrigger) return;
 
     const timeoutId = setTimeout(() => {
+      const latestErrors = validateForm(
+        formData,
+        students
+      );
+
+      if (Object.keys(latestErrors).length > 0) {
+        setErrors(latestErrors);
+        setSubmitAttempted(true);
+        setIsSubmitting(false);
+        setSubmitTrigger(false);
+        return;
+      }
+
       const newStudent: Student = {
         id: Date.now().toString(),
         name: formData.name.trim(),
@@ -141,15 +167,16 @@ export default function AddStudentForm({
           .map((skill) => skill.trim())
           .filter((skill) => skill.length > 0),
         avatarUrl:
-          "https://i.pravatar.cc/150?u=" + Date.now(),
+          "https://i.pravatar.cc/150?u=" +
+          Date.now(),
       };
 
-      setIsSubmitting(false);
       setSubmitTrigger(false);
+      setIsSubmitting(false);
 
+      // Parent adds the student and navigates back
       onSubmitSuccess(newStudent);
 
-      // Reset form after successful submission
       setFormData({
         name: "",
         studentId: "",
@@ -163,7 +190,6 @@ export default function AddStudentForm({
       setSubmitAttempted(false);
     }, 1500);
 
-    // Clean up the timeout if the component unmounts
     return () => {
       clearTimeout(timeoutId);
     };
@@ -185,7 +211,9 @@ export default function AddStudentForm({
       <FormField
         label="Full Name"
         value={formData.name}
-        onChangeText={(text) => updateField("name", text)}
+        onChangeText={(text) =>
+          updateField("name", text)
+        }
         onBlur={() => markTouched("name")}
         placeholder="Enter full name"
         error={getFieldError("name")}
@@ -217,7 +245,9 @@ export default function AddStudentForm({
       <FormField
         label="Bio"
         value={formData.bio}
-        onChangeText={(text) => updateField("bio", text)}
+        onChangeText={(text) =>
+          updateField("bio", text)
+        }
         onBlur={() => markTouched("bio")}
         placeholder="Write a short bio"
         multiline
@@ -238,11 +268,11 @@ export default function AddStudentForm({
         Separate skills with commas.
       </Text>
 
-      {/* Submit Button */}
       <Pressable
         style={[
           styles.button,
-          !isFormValid && styles.buttonDisabled,
+          (!isFormValid || isSubmitting) &&
+            styles.buttonDisabled,
         ]}
         onPress={handleSubmitPress}
         disabled={!isFormValid || isSubmitting}
